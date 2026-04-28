@@ -55,6 +55,25 @@ type Compressor struct {
 func Init(bitrate, channels, sampleRate, duration int, encBuf []byte, decBuf []int16) (*Compressor, error) {
 	const op = "compressor.Init"
 
+	if bitrate <= 0 {
+		bitrate = 48000
+	}
+	if channels <= 0 {
+		channels = 2
+	}
+	if sampleRate <= 0 {
+		sampleRate = 48000
+	}
+	if duration <= 0 {
+		duration = 20
+	}
+	if encBuf == nil {
+		encBuf = make([]byte, 1920)
+	}
+	if decBuf == nil {
+		decBuf = make([]int16, 1920)
+	}
+
 	opusEn, err := opus.NewEncoder(sampleRate, channels, opus.AppAudio)
 	if err != nil {
 		return nil, fmt.Errorf("%s: opus.NewEncoder: %w", op, err)
