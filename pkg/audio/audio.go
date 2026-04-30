@@ -118,6 +118,11 @@ func (a *AudioClient) Record(w io.Writer) error {
 func (a *AudioClient) ConvertRecord(pcm []float32, buf *[]byte) error {
 	const op = "audio.ConvertRecord"
 
+	if len(pcm) == 0 {
+		*buf = []byte{}
+		return nil
+	}
+
 	if a.useCompressor {
 		temp, err := a.inpCmpr.Compress(pcm)
 		if err != nil {
@@ -236,6 +241,11 @@ func (a *AudioClient) Play(r io.Reader) error {
 // ConvertPlay converts compressed audio or []byte to raw PCM
 func (a *AudioClient) ConvertPlay(buf []byte, pcm *[]float32) error {
 	const op = "audio.ConvertPlay"
+
+	if len(buf) == 0 {
+		*pcm = []float32{}
+		return nil
+	}
 
 	if a.useCompressor {
 		temp, err := a.outCmpr.Decompress(buf)
