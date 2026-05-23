@@ -15,6 +15,11 @@ import (
 	"github.com/gordonklaus/portaudio"
 )
 
+const (
+	isolateInputCode  = -1
+	isolateOutputCode = -2
+)
+
 // AudioClient struct contains fields for working with audio.
 type AudioClient struct {
 	// bitrate is the target audio bitrate in bits per second (used by compressor).
@@ -137,10 +142,6 @@ func Init(bufSize, queueSize, readSize, cmprSize, channels, bitrate, sampleRate,
 		return nil, fmt.Errorf("%s: input or output device init failed", op)
 	}
 
-	if err := acl.AutoRouteMonitor(); err != nil {
-		fmt.Printf("\nERROR: failled to audio initialize monitor\nCall it yourself.\nError: %w", err)
-	}
-
 	if useCompressor {
 		encInpBuf := make([]byte, cmprSize)
 		encOutBuf := make([]byte, cmprSize)
@@ -205,7 +206,7 @@ func (acl *AudioClient) AutoRouteMonitor() error {
 
 	time.Sleep(200 * time.Millisecond)
 
-	out, err := exec.Command("pactl", "list", "short", "source-outputs").Output()
+	out, err := exec.Command("pactl", "list", "source-outputs").Output()
 	if err != nil {
 		return err
 	}
@@ -223,6 +224,135 @@ func (acl *AudioClient) AutoRouteMonitor() error {
 	})
 
 	return nil
+}
+
+// SetInputByName sets the input device by name.
+func (acl *AudioClient) SetInputByName(name string) error {
+	const op = "audio.SetInputByName"
+
+	if err := acl.setDeviceByName(name, func(device *portaudio.DeviceInfo) {
+		acl.inpDevice = device
+	}); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+// SetOutputByName sets the output device by name.
+func (acl *AudioClient) SetOutputByName(name string) error {
+	const op = "audio.SetOutputByName"
+	if err := acl.setDeviceByName(name, func(device *portaudio.DeviceInfo) {
+		acl.outDevice = device
+	}); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+// setDeviceByName sets the device by name.
+// It iterates over all devices and finds the one with the given name.
+// If found, it yields the device info.
+func (acl *AudioClient) setDeviceByName(name string, yield func(device *portaudio.DeviceInfo)) error {
+	const op = "audio.setDeviceByName"
+
+	devices, _ := portaudio.Devices()
+	for _, device := range devices {
+		if device.Name == name {
+			yield(device)
+			return nil
+		}
+	}
+	return fmt.Errorf("device %s not found", name)
+}
+
+// IsolateInput isolates the input stream.
+// Used isolateStream func
+func (acl *AudioClient) IsolateInput(sinkName, appName string) error {
+	const op = "audio.IsolateInput"
+	if err := acl.isolateStream(sinkName, appName, isolateInputCode); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+// IsolateOutput isolates the output stream.
+// Used isolateStream func
+func (acl *AudioClient) IsolateOutput(sinkName, appName string) error {
+	const op = "audio.IsolateOutput"
+	if err := acl.isolateStream(sinkName, appName, isolateOutputCode); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+
+	return nil
+}
+
+// isolateStream creates a new null sink and moves the stream to it.
+// It is used to isolate the input stream from the rest of the system.
+func (acl *AudioClient) isolateStream(sinkName, appName string, dev int) error {
+	const op = "audio.isolateStream"
+
+	var listCmd, moveCmd, objectType string
+	switch dev {
+	case isolateInputCode:
+		listCmd, moveCmd, objectType = "source-outputs", "move-source-output", "Source Output"
+	case isolateOutputCode:
+		listCmd, moveCmd, objectType = "sink-inputs", "move-sink-input", "Sink Input"
+	default:
+		return fmt.Errorf("%s: invalid device code %d", op, dev)
+	}
+
+	exec.Command("pactl", "load-module", "module-null-sink",
+		"sink_name="+sinkName,
+		"sink_properties=device.description="+sinkName).Run()
+
+	time.Sleep(100 * time.Millisecond) // wait for the module to load
+
+	out, err := exec.Command("pactl", "list", listCmd).Output()
+	if err != nil {
+		return fmt.Errorf("%s: no sinks found: %w", op, err)
+	}
+
+	streamID := findStreamID(out, appName, objectType)
+	if streamID == "" {
+		return fmt.Errorf("%s: sink %s not found", op, sinkName)
+	}
+
+	exec.Command("pactl", moveCmd, streamID, sinkName).Run()
+
+	exec.Command("pactl", "load-module", "module-loopback",
+		"source="+sinkName+".monitor",
+		"sink=@DEFAULT_SINK@").Run()
+
+	return nil
+}
+
+// findStreamID finds the stream ID of the given app name.
+func findStreamID(out []byte, appName, objectType string) string {
+	blocks := bytes.Split(out, []byte("\n\n"))
+
+	searchTag := []byte("application.name = \"" + appName + "\"")
+	headerTag := []byte(objectType + " #")
+
+	for _, block := range blocks {
+		if bytes.Contains(block, searchTag) {
+			lines := bytes.Split(block, []byte("\n"))
+			if len(lines) <= 0 {
+				continue
+			}
+			if bytes.HasPrefix(lines[0], headerTag) {
+				parts := bytes.Split(lines[0], []byte("#"))
+				if len(parts) > 1 {
+					trimSpaceBytes(&parts[1])
+					return string(parts[1])
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 // trimSpaceBytes trims spaces in slice by pointer
