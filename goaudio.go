@@ -27,6 +27,24 @@ func NewRingBuffer(bufSize uint64) *rb.RingBuffer {
 	return rb.NewRB(bufSize)
 }
 
+// NewQueue creates a new Queue.
 func NewQueue(bufLen int) *queue.Queue {
 	return queue.New(bufLen)
+}
+
+// MoveStreams moves the audio stream of appName to sinkName
+// Automatically adds .monitor if sinkName is not a monitor
+// when isRecording is true
+func MoveStreams(sinkName, appName string, isRecording bool) error {
+	return audio.MoveStreams(sinkName, appName, isRecording)
+}
+
+// MoveAllSinkInputs move all active system playback streams to the sink.
+func MoveAllSinkInputs(sinkName string) error {
+	return audio.MoveAllSinkInputs(sinkName)
+}
+
+// SetDefaultSink sets sinkName as the system default sink for new streams.
+func SetDefaultSink(sinkName string) error {
+	return audio.SetDefaultSink(sinkName)
 }
